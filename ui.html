@@ -156,7 +156,17 @@
   .gedge { fill: none; stroke: var(--border); stroke-width: 1.2; }
   .gedge.hot { stroke: var(--accent); stroke-width: 2; }
   .gedge.faint { opacity: .18; }
-  .gmode { font-size: 8px; fill: var(--text-dim); }
+  /* Knock the label out of the line behind it so overlaps stay readable. */
+  .gmode {
+    font-size: 8px; fill: var(--text-dim);
+    paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round;
+  }
+  .mchip {
+    cursor: pointer; user-select: none; border: 1px solid var(--border); border-radius: 10px;
+    padding: 1px 7px; color: var(--text-dim); background: var(--bg); font-size: 10px;
+  }
+  .mchip.on { background: var(--accent-soft); color: var(--text-brand); border-color: transparent; font-weight: 550; }
+  .mchip.off { text-decoration: line-through; opacity: .55; }
   .gnode { cursor: pointer; }
   .gnode rect { fill: var(--bg); stroke-width: 1.5; }
   .gnode text { font-size: 10px; fill: var(--text); }
@@ -255,6 +265,7 @@
           <option value="3">3 hops</option>
           <option value="99">whole chain</option>
         </select>
+        <span id="gModes" style="display:flex;gap:4px;align-items:center"></span>
         <button class="ghost mini" id="gShowAll">Show all</button>
         <button class="ghost mini" id="gFit">Fit</button>
         <button class="ghost mini" id="gCount">Count bindings</button>
@@ -377,18 +388,30 @@
 
   /* ---------- input wiring ---------- */
 
+  // Everything that changes the variable selection routes through here: the graph
+  // roots off state.selected, so it has to redraw too, and an earlier
+  // double-click focus must give way to the new explicit selection.
+  function selectionChanged() {
+    renderVarList();
+    syncScanButton();
+    if (g.loaded) {
+      g.focusOverride = null;
+      renderGraph();
+    }
+  }
+
   $('filter').addEventListener('input', (e) => { state.filter = e.target.value; renderVarList(); });
   $('varlist').addEventListener('change', (e) => {
     const item = e.target.closest('.item');
     if (!item) return;
     if (e.target.checked) state.selected.add(item.dataset.id); else state.selected.delete(item.dataset.id);
-    renderVarList(); syncScanButton();
+    selectionChanged();
   });
   $('selectAll').addEventListener('click', () => {
     shownVariables().slice(0, 400).forEach((v) => state.selected.add(v.id));
-    renderVarList(); syncScanButton();
+    selectionChanged();
   });
-  $('clearSel').addEventListener('click', () => { state.selected.clear(); renderVarList(); syncScanButton(); });
+  $('clearSel').addEventListener('click', () => { state.selected.clear(); selectionChanged(); });
 
   $('pagesToggle').addEventListener('click', () => {
     const body = $('pagesBody');
@@ -507,6 +530,7 @@
       g.edges = msg.edges;
       g.loaded = true;
       graphIndex();
+      renderModeChips();
       renderGraph();
     }
 
@@ -689,16 +713,22 @@
   const PALETTE = ['#0d99ff', '#8a63d2', '#14ae5c', '#f2994a', '#e35d6a', '#00a3a3'];
 
   const g = {
-    loaded: false, nodes: [], edges: [], byId: new Map(), out: new Map(), inn: new Map(),
+    loaded: false, nodes: [], edges: [], active: [], modes: [], modeOff: new Set(),
+    byId: new Map(), out: new Map(), inn: new Map(),
     colors: new Map(), counts: null, showAll: false, focusOverride: null,
-    view: { k: 1, x: 20, y: 20 }, laidOut: [], elems: new Map(), edgeElems: [], drag: null,
+    view: { k: 1, x: 20, y: 20 }, elems: new Map(), edgeElems: [], drag: null,
   };
 
   function graphIndex() {
     g.byId = new Map(g.nodes.map((n) => [n.id, n]));
+    g.modes = Array.from(new Set(g.edges.map((e) => e.mode || '(no mode)'))).sort();
+
+    // Adjacency is built from the mode-filtered edges only, so switching off a
+    // mode also drops the nodes that were only reachable through it.
+    g.active = g.edges.filter((e) => !g.modeOff.has(e.mode || '(no mode)'));
     g.out = new Map();
     g.inn = new Map();
-    for (const e of g.edges) {
+    for (const e of g.active) {
       if (!g.out.has(e.from)) g.out.set(e.from, []);
       if (!g.inn.has(e.to)) g.inn.set(e.to, []);
       g.out.get(e.from).push(e);
@@ -707,6 +737,29 @@
     const cols = Array.from(new Set(g.nodes.map((n) => n.collection)));
     g.colors = new Map(cols.map((c, i) => [c, c === 'external' ? 'var(--text-dim)' : PALETTE[i % PALETTE.length]]));
   }
+
+  function renderModeChips() {
+    $('gModes').innerHTML = g.modes.length < 2 ? '' : '<span class="meta">modes</span>' + g.modes.map((m) =>
+      '<span class="mchip ' + (g.modeOff.has(m) ? 'off' : 'on') + '" data-mode="' + esc(m) + '" title="click to toggle · double-click to follow only this one">' +
+      esc(m) + '</span>').join('');
+  }
+
+  $('gModes').addEventListener('click', (e) => {
+    const chip = e.target.closest('.mchip');
+    if (!chip) return;
+    const m = chip.dataset.mode;
+    if (g.modeOff.has(m)) g.modeOff.delete(m); else g.modeOff.add(m);
+    if (g.modeOff.size === g.modes.length) g.modeOff.clear(); // never leave zero modes on
+    graphIndex(); renderModeChips(); renderGraph();
+  });
+
+  $('gModes').addEventListener('dblclick', (e) => {
+    const chip = e.target.closest('.mchip');
+    if (!chip) return;
+    const solo = chip.dataset.mode;
+    g.modeOff = new Set(g.modes.filter((m) => m !== solo));
+    graphIndex(); renderModeChips(); renderGraph();
+  });
 
   function neighbourhood(rootIds, hops) {
     const seen = new Set(rootIds);
@@ -723,10 +776,17 @@
   }
 
   function graphRoots() {
-    if (g.focusOverride) return [g.focusOverride];
+    if (g.focusOverride) { g.rootSource = 'centred on one variable'; return [g.focusOverride]; }
     const f = $('gFilter').value.trim().toLowerCase();
-    if (f) return g.nodes.filter((n) => n.name.toLowerCase().includes(f)).map((n) => n.id);
-    if (state.selected.size) return Array.from(state.selected).filter((id) => g.byId.has(id));
+    if (f) {
+      g.rootSource = 'filtered by “' + f + '”';
+      return g.nodes.filter((n) => n.name.toLowerCase().includes(f)).map((n) => n.id);
+    }
+    if (state.selected.size) {
+      g.rootSource = state.selected.size + ' selected';
+      return Array.from(state.selected).filter((id) => g.byId.has(id));
+    }
+    g.rootSource = null;
     return null;
   }
 
@@ -779,7 +839,7 @@
     let visible;
     if (g.showAll && !roots) {
       visible = new Set();
-      for (const e of g.edges) { visible.add(e.from); visible.add(e.to); }
+      for (const e of g.active) { visible.add(e.from); visible.add(e.to); }
     } else {
       visible = neighbourhood(roots, parseInt($('gHops').value, 10));
     }
@@ -838,22 +898,47 @@
     const svgW = (columns.size - 1) * (NODE_W + COL_GAP) + NODE_W + 40;
     const svgH = maxRows * (NODE_H + ROW_GAP) + 40;
 
-    const showModes = visible.size <= 120;
-    let edgeHtml = '';
-    const drawn = [];
-    for (const e of g.edges) {
+    // One variable can alias different targets per mode, and two modes can point
+    // at the SAME target — those drew as identical overlapping paths with their
+    // labels stacked on one another. Merge by pair and label once.
+    const pairs = new Map();
+    let drawnCount = 0;
+    for (const e of g.active) {
       if (!pos.has(e.from) || !pos.has(e.to)) continue;
-      const a = pos.get(e.from), b = pos.get(e.to);
+      const key = e.from + '>' + e.to;
+      if (!pairs.has(key)) pairs.set(key, { from: e.from, to: e.to, modes: [] });
+      const bucket = pairs.get(key);
+      if (e.mode && bucket.modes.indexOf(e.mode) === -1) bucket.modes.push(e.mode);
+      drawnCount++;
+    }
+
+    const activeModes = g.modes.filter((m) => !g.modeOff.has(m));
+    const showModes = visible.size <= 120 && activeModes.length > 1;
+    const spread = [0.5, 0.36, 0.64, 0.44, 0.56];
+    const perSource = new Map();
+
+    let edgeHtml = '';
+    for (const pair of pairs.values()) {
+      const a = pos.get(pair.from), b = pos.get(pair.to);
       const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2;
       const x2 = b.x, y2 = b.y + NODE_H / 2;
       const mx = (x1 + x2) / 2;
-      edgeHtml += '<path class="gedge" data-from="' + esc(e.from) + '" data-to="' + esc(e.to) +
+      edgeHtml += '<path class="gedge" data-from="' + esc(pair.from) + '" data-to="' + esc(pair.to) +
         '" d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '"></path>';
-      if (showModes && e.mode) {
-        edgeHtml += '<text class="gmode" x="' + mx + '" y="' + ((y1 + y2) / 2 - 3) + '" text-anchor="middle">' + esc(e.mode) + '</text>';
+
+      if (showModes && pair.modes.length) {
+        // Fan labels of edges leaving the same node along their curves so they
+        // do not pile up at one midpoint.
+        const seq = (perSource.get(pair.from) || 0);
+        perSource.set(pair.from, seq + 1);
+        const t = spread[seq % spread.length];
+        const lx = x1 + (x2 - x1) * t;
+        const ly = y1 + (y2 - y1) * t - 3;
+        const label = pair.modes.length > 2 ? pair.modes.length + ' modes' : pair.modes.join(' · ');
+        edgeHtml += '<text class="gmode" x="' + lx + '" y="' + ly + '" text-anchor="middle">' + esc(label) + '</text>';
       }
-      drawn.push(e);
     }
+    const drawn = { length: drawnCount };
 
     let nodeHtml = '';
     for (const id of visible) {
@@ -883,6 +968,8 @@
     g.edgeElems = Array.from(canvas.querySelectorAll('.gedge'));
 
     $('gStats').textContent = visible.size + ' of ' + g.nodes.length + ' variables · ' + drawn.length + ' aliases' +
+      (g.rootSource ? ' · ' + g.rootSource : '') +
+      (activeModes.length === 1 ? ' · following ' + activeModes[0] : '') +
       (g.counts ? ' · counts loaded' : '');
     renderLegend(visible);
   }
@@ -892,7 +979,7 @@
     for (const id of visible) used.add(g.byId.get(id).collection);
     $('graphLegend').innerHTML = Array.from(used).sort().map((c) =>
       '<span><i style="border-color:' + g.colors.get(c) + '"></i>' + esc(c) + '</span>').join('') +
-      '<span style="margin-left:auto">drag to pan · scroll to zoom · click a node to select it · double-click to re-centre</span>';
+      '<span style="margin-left:auto">drag to pan · scroll to zoom · click a node to select it · double-click to re-centre · double-click a mode chip to follow only that mode</span>';
   }
 
   function applyTransform() {
@@ -971,7 +1058,9 @@
     const id = node.dataset.id;
     if (!g.byId.get(id) || g.byId.get(id).external) return;
     if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
-    renderVarList(); syncScanButton(); renderGraph();
+    renderVarList();
+    syncScanButton();
+    renderGraph();
   });
 
   $('graphCanvas').addEventListener('dblclick', (e) => {

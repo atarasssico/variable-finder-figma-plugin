@@ -55,6 +55,13 @@ Large token systems are too dense to draw whole, so the graph focuses by default
 - Nodes are coloured by collection. Aliases pointing outside the file are drawn as
   `outside this file`, so you can see where a chain leaves for a subscribed library.
 
+**Following one mode.** Each mode in the file gets a chip in the graph toolbar. Click to
+toggle it off and its alias links disappear, along with any node only reachable through it.
+Double-click a chip to follow that mode alone — useful when a collection's modes point at
+different primitives and you only care about one path. With a single mode active the edge
+labels are dropped, since there is nothing left to disambiguate, and the toolbar says which
+mode you are following.
+
 **Count bindings** runs one pass over the document and tallies bindings for *every*
 variable at once, then annotates each node with its count. Variables with none get a dashed
 outline, and **unused only** filters the graph down to them — that is the fast way to find
