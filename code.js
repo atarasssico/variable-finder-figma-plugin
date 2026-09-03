@@ -14,6 +14,8 @@ figma.showUI(__html__, { width: 920, height: 680, themeColors: true });
 figma.ui.onmessage = async (msg) => {
   try {
     if (msg.type === 'init') return await sendInit();
+    if (msg.type === 'graph') return await sendGraph();
+    if (msg.type === 'count-all') return await countAll(msg);
     if (msg.type === 'scan') return await runScan(msg);
     if (msg.type === 'cancel') { state.cancel = true; return; }
     if (msg.type === 'reveal') return await reveal(msg.pageId, msg.nodeIds);
@@ -82,6 +84,132 @@ async function sendInit() {
     fileName: figma.root.name,
     currentPageId: figma.currentPage.id,
   });
+}
+
+/* ---------- alias graph ---------- */
+
+async function sendGraph() {
+  const [vars, collections] = await Promise.all([
+    figma.variables.getLocalVariablesAsync(),
+    figma.variables.getLocalVariableCollectionsAsync(),
+  ]);
+  const colById = new Map(collections.map((c) => [c.id, c]));
+  const known = new Set(vars.map((v) => v.id));
+
+  const nodes = vars.map((v) => {
+    const col = colById.get(v.variableCollectionId);
+    return {
+      id: v.id,
+      name: v.name,
+      type: v.resolvedType,
+      collection: col ? col.name : 'unknown',
+    };
+  });
+
+  const edges = [];
+  const missing = new Set();
+  for (const v of vars) {
+    const col = colById.get(v.variableCollectionId);
+    for (const modeId in v.valuesByMode) {
+      const val = v.valuesByMode[modeId];
+      if (!val || val.type !== 'VARIABLE_ALIAS') continue;
+      const mode = col ? (col.modes.find((m) => m.modeId === modeId) || {}).name : '';
+      edges.push({ from: v.id, to: val.id, mode: mode || '' });
+      if (!known.has(val.id)) missing.add(val.id);
+    }
+  }
+
+  // Aliases can point at variables from a subscribed library. Resolve their
+  // names so the graph shows where a chain leaves this file.
+  for (const id of missing) {
+    let name = 'library variable';
+    try {
+      const remote = await figma.variables.getVariableByIdAsync(id);
+      if (remote) name = remote.name;
+    } catch (err) {
+      /* unresolvable, keep the placeholder */
+    }
+    nodes.push({ id, name, type: 'UNKNOWN', collection: 'external', external: true });
+  }
+
+  figma.ui.postMessage({
+    type: 'graph-data',
+    nodes,
+    edges,
+    collections: collections.map((c) => c.name).concat(missing.size ? ['external'] : []),
+  });
+}
+
+/* ---------- count bindings for every variable ---------- */
+
+async function countAll(opts) {
+  if (state.scanning) return;
+  state.scanning = true;
+  state.cancel = false;
+  figma.skipInvisibleInstanceChildren = opts.skipHiddenInInstances !== false;
+
+  const excluded = new Set(opts.excludedPageIds || []);
+  const pages = figma.root.children.filter((p) => !excluded.has(p.id));
+  const matchers = compilePatterns(opts.excludeText);
+  const counts = Object.create(null);
+
+  const FLUSH_MS = 120;
+  let lastFlush = Date.now();
+  let nodesScanned = 0;
+
+  figma.ui.postMessage({ type: 'count-start', totalPages: pages.length });
+
+  for (let p = 0; p < pages.length; p++) {
+    if (state.cancel) break;
+    const page = pages[p];
+    figma.ui.postMessage({ type: 'page-start', index: p, totalPages: pages.length, pageName: page.name });
+    await page.loadAsync();
+
+    const stack = [];
+    for (let i = page.children.length - 1; i >= 0; i--) stack.push(page.children[i]);
+    let sinceCheck = 0;
+
+    while (stack.length) {
+      if (++sinceCheck >= 2048) {
+        sinceCheck = 0;
+        const now = Date.now();
+        if (now - lastFlush >= FLUSH_MS) {
+          lastFlush = now;
+          figma.ui.postMessage({
+            type: 'tick', index: p, totalPages: pages.length, pageName: page.name,
+            nodesScanned, totalHits: 0, queued: stack.length,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
+      const node = stack.pop();
+      let skip = false;
+      for (let m = 0; m < matchers.length; m++) {
+        if (matchers[m].test(node.name)) { skip = true; break; }
+      }
+      if (skip) continue;
+      nodesScanned++;
+
+      const bindings = collectBindings(node);
+      if (bindings) {
+        const seen = new Set();
+        for (const b of bindings) {
+          if (seen.has(b.id)) continue;
+          seen.add(b.id);
+          counts[b.id] = (counts[b.id] || 0) + 1;
+        }
+      }
+
+      if ('children' in node && node.children.length) {
+        if (opts.skipInsideInstances && node.type === 'INSTANCE') continue;
+        for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i]);
+      }
+    }
+  }
+
+  state.scanning = false;
+  figma.ui.postMessage({ type: 'count-done', counts, nodesScanned, cancelled: state.cancel });
 }
 
 /* ---------- exclusion patterns ---------- */

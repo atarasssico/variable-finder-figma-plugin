@@ -39,6 +39,27 @@ from `variantProperties`, falling back to VARIANT-typed `componentProperties` fo
 and BFSes it, so a primitive with zero direct bindings still reports the layers that reach
 it through a semantic variable.
 
+## Alias graph
+
+`sendGraph()` returns every local variable as a node plus one edge per aliased mode value,
+so a variable pointing at different primitives per mode yields one edge per mode. Alias
+targets that are not local are resolved with `getVariableByIdAsync` and marked `external` —
+that is how a chain leaving for a subscribed library stays visible.
+
+Layout is a simple layered DAG, computed in the UI. `depthToLeaf()` memoises the longest
+distance to a node with no visible outgoing alias; column index is `maxDepth - depth`, so
+primitives land on the right and their consumers to the left. Within a column nodes sort by
+collection then name. Alias chains cannot cycle in Figma, but the recursion carries a
+seen-set anyway.
+
+Rendering is a single SVG string with one `<g>` for pan and zoom; hover highlighting toggles
+classes on cached element references rather than re-rendering. Mode labels are dropped above
+120 visible nodes, and the whole graph declines to draw past 600.
+
+`countAll()` is a separate document pass that tallies bindings for every variable id at once,
+which is what lets the graph flag never-bound variables. It reuses the same exclusion and
+yielding logic as the targeted scan.
+
 ## Performance
 
 `figma.loadAllPagesAsync()` on a 178-page library exceeds 30s. `page.loadAsync()` per page
@@ -84,6 +105,7 @@ execute times out until it clears.
 | `Skip inside instances` | Verified. 19,263 layers walked down to 901, 3.2s to 0.08s, hits 85 -> 65. |
 | Page exclusion checklist | Logic verified as a set filter over `figma.root.children`; the checklist UI itself is untested. |
 | Two-pane layout, page checklist rendering, `clientStorage` persistence, CSV copy, reveal-on-canvas | Not run live. A local dev plugin cannot be driven from an MCP bridge. |
+| Alias graph and `countAll()` | Not run live. Graph data shape is derived from a verified read of the file's 1,577 variables and 1,708 alias edges, but neither the SVG layout nor the counting pass has executed. |
 
 ## Not implemented
 

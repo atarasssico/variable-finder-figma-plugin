@@ -37,6 +37,30 @@ text matches any part of a name (`Icons`); add `*` for a whole-name glob
 so it excludes component sets, components and instances alike, and speeds up the scan
 rather than just filtering output. The summary reports how many layers were skipped this way.
 
+## Alias graph
+
+Second tab on the right. Draws variables as a map of alias links: who references what,
+laid out left to right so consumers sit left of the primitives they resolve to, one column
+per step in the chain. Edges are labelled with the mode the alias belongs to, so a semantic
+variable that points at different primitives in Light and Dark shows both links.
+
+Large token systems are too dense to draw whole, so the graph focuses by default:
+
+- Type a name to focus on it, or tick variables on the left — the graph shows their
+  neighbourhood, 1 to 3 hops or the whole chain.
+- **Show all** renders everything anyway. Past 600 nodes it declines and asks you to narrow.
+- Hover a node to fade everything not on its chain, up and down.
+- Click a node to select that variable on the left, ready to scan. Double-click to re-centre.
+- Drag to pan, scroll to zoom, **Fit** to frame it.
+- Nodes are coloured by collection. Aliases pointing outside the file are drawn as
+  `outside this file`, so you can see where a chain leaves for a subscribed library.
+
+**Count bindings** runs one pass over the document and tallies bindings for *every*
+variable at once, then annotates each node with its count. Variables with none get a dashed
+outline, and **unused only** filters the graph down to them — that is the fast way to find
+dead tokens, including primitives that look unused but are in fact reached through an alias.
+It honours the same page and name exclusions as a normal scan.
+
 ## Options
 
 - **Follow aliases** — also reports layers that reach the variable indirectly, through

@@ -127,6 +127,45 @@
   .fld { background: var(--bg-alt); border-radius: 3px; padding: 0 4px; color: var(--text-dim); flex: 0 0 auto; }
   .variant, .inst { color: var(--text-dim); }
 
+  #tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--border); }
+  .tab {
+    background: transparent; border: 1px solid transparent; border-bottom: none;
+    padding: 5px 11px; color: var(--text-dim); border-radius: 5px 5px 0 0;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.on { color: var(--text); background: var(--bg-alt); border-color: var(--border); }
+
+  #graph { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  #graphControls {
+    flex: 0 0 auto; padding: 8px 14px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  }
+  #graphControls input[type="text"] { width: 150px; }
+  #graphControls label { display: flex; align-items: center; gap: 4px; color: var(--text-dim); cursor: pointer; }
+  #graphControls input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+  #graphCanvas { flex: 1 1 auto; position: relative; overflow: hidden; cursor: grab; }
+  #graphCanvas.dragging { cursor: grabbing; }
+  #graphSvg { width: 100%; height: 100%; display: block; }
+  #graphLegend {
+    flex: 0 0 auto; padding: 6px 14px; border-top: 1px solid var(--border);
+    display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-dim);
+  }
+  #graphLegend span { display: flex; align-items: center; gap: 4px; }
+  #graphLegend i { width: 9px; height: 9px; border-radius: 2px; border: 1.5px solid; display: inline-block; }
+
+  .gedge { fill: none; stroke: var(--border); stroke-width: 1.2; }
+  .gedge.hot { stroke: var(--accent); stroke-width: 2; }
+  .gedge.faint { opacity: .18; }
+  .gmode { font-size: 8px; fill: var(--text-dim); }
+  .gnode { cursor: pointer; }
+  .gnode rect { fill: var(--bg); stroke-width: 1.5; }
+  .gnode text { font-size: 10px; fill: var(--text); }
+  .gnode .gsub { font-size: 9px; fill: var(--text-dim); }
+  .gnode.faint { opacity: .2; }
+  .gnode.sel rect { stroke-width: 3; }
+  .gnode.unused rect { stroke-dasharray: 3 2; }
+  .gcount { font-size: 9px; fill: var(--text-dim); }
+
   .state { padding: 46px 30px; text-align: center; color: var(--text-dim); }
   .state h3 { margin: 0 0 6px; font-size: 12px; color: var(--text); }
   .state p { margin: 0 auto; max-width: 320px; }
@@ -192,6 +231,10 @@
   </aside>
 
   <section id="right">
+    <div id="tabs">
+      <button class="tab on" data-view="results">Results</button>
+      <button class="tab" data-view="graph">Alias graph</button>
+    </div>
     <div id="progress">
       <div class="prow">
         <span class="spinner"></span>
@@ -202,6 +245,26 @@
       <div id="progressText"></div>
     </div>
     <div id="results"></div>
+
+    <div id="graph" style="display:none">
+      <div id="graphControls">
+        <input type="text" id="gFilter" placeholder="Focus on, e.g. accent" autocomplete="off">
+        <select id="gHops" style="width:auto">
+          <option value="1">1 hop</option>
+          <option value="2" selected>2 hops</option>
+          <option value="3">3 hops</option>
+          <option value="99">whole chain</option>
+        </select>
+        <button class="ghost mini" id="gShowAll">Show all</button>
+        <button class="ghost mini" id="gFit">Fit</button>
+        <button class="ghost mini" id="gCount">Count bindings</button>
+        <label><input type="checkbox" id="gUnused"> unused only</label>
+        <span class="spacer" style="flex:1 1 auto"></span>
+        <span class="meta" id="gStats"></span>
+      </div>
+      <div id="graphCanvas"><svg id="graphSvg"><g id="graphRoot"></g></svg></div>
+      <div id="graphLegend"></div>
+    </div>
   </section>
 </div>
 
@@ -439,6 +502,35 @@
       scheduleRender(true);
     }
 
+    if (msg.type === 'graph-data') {
+      g.nodes = msg.nodes;
+      g.edges = msg.edges;
+      g.loaded = true;
+      graphIndex();
+      renderGraph();
+    }
+
+    if (msg.type === 'count-start') {
+      $('progressPage').textContent = 'Counting bindings for every variable…';
+      $('progressText').textContent = '0 of ' + msg.totalPages + ' pages';
+      $('progressEta').textContent = '';
+      state.scanStart = Date.now();
+    }
+
+    if (msg.type === 'count-done') {
+      state.scanning = false;
+      g.counts = msg.counts;
+      $('progress').style.display = 'none';
+      $('cancel').style.display = 'none';
+      $('cancel').disabled = false;
+      syncScanButton();
+      const total = Object.keys(msg.counts).length;
+      const unused = g.nodes.filter((n) => !n.external && !msg.counts[n.id]).length;
+      $('status').textContent = msg.nodesScanned.toLocaleString() + ' layers counted · ' + total +
+        ' variables bound · ' + unused + ' never bound' + (msg.cancelled ? ' (stopped early)' : '');
+      renderGraph();
+    }
+
     if (msg.type === 'revealed') {
       $('status').textContent = 'Selected ' + msg.count + ' layer' + (msg.count === 1 ? '' : 's') + ' on canvas.';
     }
@@ -588,6 +680,358 @@
   $('results').addEventListener('dblclick', (e) => {
     const head = e.target.closest('.ghead');
     if (head && head.dataset.nodes) post({ type: 'reveal', pageId: head.dataset.page, nodeIds: head.dataset.nodes.split(',') });
+  });
+
+  /* ---------- alias graph ---------- */
+
+  const GRAPH_CAP = 600;
+  const NODE_W = 196, NODE_H = 30, COL_GAP = 96, ROW_GAP = 7;
+  const PALETTE = ['#0d99ff', '#8a63d2', '#14ae5c', '#f2994a', '#e35d6a', '#00a3a3'];
+
+  const g = {
+    loaded: false, nodes: [], edges: [], byId: new Map(), out: new Map(), inn: new Map(),
+    colors: new Map(), counts: null, showAll: false, focusOverride: null,
+    view: { k: 1, x: 20, y: 20 }, laidOut: [], elems: new Map(), edgeElems: [], drag: null,
+  };
+
+  function graphIndex() {
+    g.byId = new Map(g.nodes.map((n) => [n.id, n]));
+    g.out = new Map();
+    g.inn = new Map();
+    for (const e of g.edges) {
+      if (!g.out.has(e.from)) g.out.set(e.from, []);
+      if (!g.inn.has(e.to)) g.inn.set(e.to, []);
+      g.out.get(e.from).push(e);
+      g.inn.get(e.to).push(e);
+    }
+    const cols = Array.from(new Set(g.nodes.map((n) => n.collection)));
+    g.colors = new Map(cols.map((c, i) => [c, c === 'external' ? 'var(--text-dim)' : PALETTE[i % PALETTE.length]]));
+  }
+
+  function neighbourhood(rootIds, hops) {
+    const seen = new Set(rootIds);
+    let frontier = rootIds.slice();
+    for (let h = 0; h < hops && frontier.length; h++) {
+      const next = [];
+      for (const id of frontier) {
+        for (const e of g.out.get(id) || []) if (!seen.has(e.to)) { seen.add(e.to); next.push(e.to); }
+        for (const e of g.inn.get(id) || []) if (!seen.has(e.from)) { seen.add(e.from); next.push(e.from); }
+      }
+      frontier = next;
+    }
+    return seen;
+  }
+
+  function graphRoots() {
+    if (g.focusOverride) return [g.focusOverride];
+    const f = $('gFilter').value.trim().toLowerCase();
+    if (f) return g.nodes.filter((n) => n.name.toLowerCase().includes(f)).map((n) => n.id);
+    if (state.selected.size) return Array.from(state.selected).filter((id) => g.byId.has(id));
+    return null;
+  }
+
+  // Longest distance to a leaf within the visible subgraph. Alias chains are
+  // acyclic in Figma, but the seen-set guards against surprises.
+  function depthToLeaf(id, visible, memo, seen) {
+    if (memo.has(id)) return memo.get(id);
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    let best = 0;
+    for (const e of g.out.get(id) || []) {
+      if (!visible.has(e.to)) continue;
+      best = Math.max(best, 1 + depthToLeaf(e.to, visible, memo, seen));
+    }
+    seen.delete(id);
+    memo.set(id, best);
+    return best;
+  }
+
+  function renderGraph() {
+    const canvas = $('graphCanvas');
+    const root = $('graphRoot');
+
+    if (!g.loaded) {
+      $('gStats').textContent = 'loading…';
+      root.innerHTML = '';
+      return;
+    }
+    if (!g.edges.length) {
+      $('gStats').textContent = '';
+      root.innerHTML = '';
+      canvas.innerHTML = '<div class="state"><h3>No aliases in this file</h3><p>No variable references another, so there is no graph to draw. Variables that hold literal values only are shown in the picker on the left.</p></div>';
+      return;
+    }
+
+    const roots = graphRoots();
+    if (!roots && !g.showAll) {
+      root.innerHTML = '';
+      $('gStats').textContent = g.nodes.length + ' variables · ' + g.edges.length + ' aliases';
+      canvas.innerHTML = '<div class="state"><h3>Pick a starting point</h3><p>Type a name above, or tick variables on the left, to see what they alias and what aliases them. ' +
+        g.nodes.length + ' variables and ' + g.edges.length + ' alias links is too dense to read all at once — <b>Show all</b> renders it anyway.</p></div>';
+      return;
+    }
+    if (roots && !roots.length) {
+      root.innerHTML = '';
+      canvas.innerHTML = '<div class="state"><h3>Nothing matches</h3><p>No variable name contains “' + esc($('gFilter').value.trim()) + '”.</p></div>';
+      return;
+    }
+
+    let visible;
+    if (g.showAll && !roots) {
+      visible = new Set();
+      for (const e of g.edges) { visible.add(e.from); visible.add(e.to); }
+    } else {
+      visible = neighbourhood(roots, parseInt($('gHops').value, 10));
+    }
+
+    if (g.counts && $('gUnused').checked) {
+      const kept = new Set();
+      for (const id of visible) if (!g.counts[id]) kept.add(id);
+      visible = kept;
+      if (!visible.size) {
+        root.innerHTML = '';
+        canvas.innerHTML = '<div class="state"><h3>Nothing unused here</h3><p>Every variable in view has at least one binding. Untick <b>unused only</b> to see them.</p></div>';
+        return;
+      }
+    }
+
+    if (visible.size > GRAPH_CAP) {
+      root.innerHTML = '';
+      canvas.innerHTML = '<div class="state"><h3>' + visible.size + ' variables in view</h3><p>Past ' + GRAPH_CAP +
+        ' nodes the graph stops being readable. Narrow the focus, or drop to 1 hop.</p></div>';
+      $('gStats').textContent = visible.size + ' nodes, capped';
+      return;
+    }
+
+    // ensure the svg shell exists again after any state message replaced it
+    if (!document.getElementById('graphSvg')) {
+      canvas.innerHTML = '<svg id="graphSvg"><g id="graphRoot"></g></svg>';
+    }
+
+    const memo = new Map();
+    let maxDepth = 0;
+    const items = [];
+    for (const id of visible) {
+      const d = depthToLeaf(id, visible, memo, new Set());
+      maxDepth = Math.max(maxDepth, d);
+      items.push({ id, depth: d });
+    }
+
+    const columns = new Map();
+    for (const it of items) {
+      const col = maxDepth - it.depth;
+      if (!columns.has(col)) columns.set(col, []);
+      columns.get(col).push(it.id);
+    }
+
+    const pos = new Map();
+    let maxRows = 0;
+    Array.from(columns.keys()).sort((a, b) => a - b).forEach((col) => {
+      const ids = columns.get(col).sort((a, b) => {
+        const na = g.byId.get(a), nb = g.byId.get(b);
+        return na.collection.localeCompare(nb.collection) || na.name.localeCompare(nb.name);
+      });
+      ids.forEach((id, i) => pos.set(id, { x: col * (NODE_W + COL_GAP), y: i * (NODE_H + ROW_GAP) }));
+      maxRows = Math.max(maxRows, ids.length);
+    });
+
+    const svgW = (columns.size - 1) * (NODE_W + COL_GAP) + NODE_W + 40;
+    const svgH = maxRows * (NODE_H + ROW_GAP) + 40;
+
+    const showModes = visible.size <= 120;
+    let edgeHtml = '';
+    const drawn = [];
+    for (const e of g.edges) {
+      if (!pos.has(e.from) || !pos.has(e.to)) continue;
+      const a = pos.get(e.from), b = pos.get(e.to);
+      const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2;
+      const x2 = b.x, y2 = b.y + NODE_H / 2;
+      const mx = (x1 + x2) / 2;
+      edgeHtml += '<path class="gedge" data-from="' + esc(e.from) + '" data-to="' + esc(e.to) +
+        '" d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '"></path>';
+      if (showModes && e.mode) {
+        edgeHtml += '<text class="gmode" x="' + mx + '" y="' + ((y1 + y2) / 2 - 3) + '" text-anchor="middle">' + esc(e.mode) + '</text>';
+      }
+      drawn.push(e);
+    }
+
+    let nodeHtml = '';
+    for (const id of visible) {
+      const n = g.byId.get(id);
+      const p = pos.get(id);
+      const colour = g.colors.get(n.collection) || 'var(--text-dim)';
+      const count = g.counts ? (g.counts[id] || 0) : null;
+      const short = n.name.length > 30 ? n.name.slice(0, 29) + '…' : n.name;
+      const cls = ['gnode'];
+      if (state.selected.has(id)) cls.push('sel');
+      if (g.counts && !count) cls.push('unused');
+      nodeHtml += '<g class="' + cls.join(' ') + '" data-id="' + esc(id) + '" transform="translate(' + p.x + ',' + p.y + ')">' +
+        '<title>' + esc(n.name) + ' · ' + esc(n.collection) + (count === null ? '' : ' · ' + count + ' bindings') + '</title>' +
+        '<rect width="' + NODE_W + '" height="' + NODE_H + '" rx="5" stroke="' + colour + '"></rect>' +
+        '<text x="8" y="13">' + esc(short) + '</text>' +
+        '<text class="gsub" x="8" y="24">' + esc(n.collection) + (n.external ? ' · outside this file' : '') + '</text>' +
+        (count === null ? '' : '<text class="gcount" x="' + (NODE_W - 8) + '" y="19" text-anchor="end">' + count + '</text>') +
+        '</g>';
+    }
+
+    canvas.innerHTML = '<svg id="graphSvg" viewBox="0 0 ' + svgW + ' ' + svgH + '"><g id="graphRoot">' +
+      edgeHtml + nodeHtml + '</g></svg>';
+    applyTransform();
+
+    g.elems = new Map();
+    canvas.querySelectorAll('.gnode').forEach((el) => g.elems.set(el.dataset.id, el));
+    g.edgeElems = Array.from(canvas.querySelectorAll('.gedge'));
+
+    $('gStats').textContent = visible.size + ' of ' + g.nodes.length + ' variables · ' + drawn.length + ' aliases' +
+      (g.counts ? ' · counts loaded' : '');
+    renderLegend(visible);
+  }
+
+  function renderLegend(visible) {
+    const used = new Set();
+    for (const id of visible) used.add(g.byId.get(id).collection);
+    $('graphLegend').innerHTML = Array.from(used).sort().map((c) =>
+      '<span><i style="border-color:' + g.colors.get(c) + '"></i>' + esc(c) + '</span>').join('') +
+      '<span style="margin-left:auto">drag to pan · scroll to zoom · click a node to select it · double-click to re-centre</span>';
+  }
+
+  function applyTransform() {
+    const root = document.getElementById('graphRoot');
+    if (root) root.setAttribute('transform', 'translate(' + g.view.x + ',' + g.view.y + ') scale(' + g.view.k + ')');
+  }
+
+  function reachable(id) {
+    const set = new Set([id]);
+    const walkDir = (start, map, key) => {
+      const queue = [start];
+      while (queue.length) {
+        const cur = queue.shift();
+        for (const e of map.get(cur) || []) {
+          const nxt = e[key];
+          if (!set.has(nxt)) { set.add(nxt); queue.push(nxt); }
+        }
+      }
+    };
+    walkDir(id, g.out, 'to');
+    walkDir(id, g.inn, 'from');
+    return set;
+  }
+
+  function highlight(id) {
+    if (!id) {
+      g.elems.forEach((el) => el.classList.remove('faint'));
+      g.edgeElems.forEach((el) => el.classList.remove('hot', 'faint'));
+      return;
+    }
+    const set = reachable(id);
+    g.elems.forEach((el, nid) => el.classList.toggle('faint', !set.has(nid)));
+    g.edgeElems.forEach((el) => {
+      const on = set.has(el.dataset.from) && set.has(el.dataset.to);
+      el.classList.toggle('hot', on);
+      el.classList.toggle('faint', !on);
+    });
+  }
+
+  /* graph interaction */
+
+  $('graphCanvas').addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const k = Math.max(0.15, Math.min(4, g.view.k * factor));
+    g.view.x = mx - ((mx - g.view.x) * k) / g.view.k;
+    g.view.y = my - ((my - g.view.y) * k) / g.view.k;
+    g.view.k = k;
+    applyTransform();
+  }, { passive: false });
+
+  $('graphCanvas').addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.gnode')) return;
+    g.drag = { x: e.clientX, y: e.clientY, ox: g.view.x, oy: g.view.y };
+    $('graphCanvas').classList.add('dragging');
+  });
+  addEventListener('pointermove', (e) => {
+    if (!g.drag) return;
+    g.view.x = g.drag.ox + (e.clientX - g.drag.x);
+    g.view.y = g.drag.oy + (e.clientY - g.drag.y);
+    applyTransform();
+  });
+  addEventListener('pointerup', () => { g.drag = null; $('graphCanvas').classList.remove('dragging'); });
+
+  $('graphCanvas').addEventListener('mouseover', (e) => {
+    const node = e.target.closest('.gnode');
+    if (node) highlight(node.dataset.id);
+  });
+  $('graphCanvas').addEventListener('mouseleave', () => highlight(null));
+
+  $('graphCanvas').addEventListener('click', (e) => {
+    const node = e.target.closest('.gnode');
+    if (!node) return;
+    const id = node.dataset.id;
+    if (!g.byId.get(id) || g.byId.get(id).external) return;
+    if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
+    renderVarList(); syncScanButton(); renderGraph();
+  });
+
+  $('graphCanvas').addEventListener('dblclick', (e) => {
+    const node = e.target.closest('.gnode');
+    if (!node) return;
+    g.focusOverride = node.dataset.id;
+    $('gFilter').value = '';
+    g.showAll = false;
+    g.view = { k: 1, x: 20, y: 20 };
+    renderGraph();
+  });
+
+  $('gFilter').addEventListener('input', () => { g.focusOverride = null; g.showAll = false; renderGraph(); });
+  $('gHops').addEventListener('change', renderGraph);
+  $('gUnused').addEventListener('change', renderGraph);
+  $('gShowAll').addEventListener('click', () => {
+    g.showAll = true; g.focusOverride = null; $('gFilter').value = '';
+    g.view = { k: 0.5, x: 20, y: 20 };
+    renderGraph();
+  });
+  $('gFit').addEventListener('click', () => {
+    const svg = document.getElementById('graphSvg');
+    if (!svg) return;
+    const vb = (svg.getAttribute('viewBox') || '').split(' ').map(Number);
+    const rect = $('graphCanvas').getBoundingClientRect();
+    if (vb.length === 4 && vb[2] && vb[3]) {
+      g.view.k = Math.min(rect.width / vb[2], rect.height / vb[3], 2) * 0.95;
+      g.view.x = 10; g.view.y = 10;
+      applyTransform();
+    }
+  });
+  $('gCount').addEventListener('click', () => {
+    if (state.scanning) return;
+    state.scanning = true;
+    $('progress').style.display = 'block';
+    $('progressBar').style.width = '0';
+    $('cancel').style.display = 'inline-block';
+    syncScanButton();
+    post({
+      type: 'count-all',
+      excludedPageIds: Array.from(state.excludedPages),
+      excludeText: $('excludeText').value,
+      skipInsideInstances: $('skipInstances').checked,
+      skipHiddenInInstances: $('skipHidden').checked,
+    });
+  });
+
+  /* tabs */
+
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    const view = tab.dataset.view;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t === tab));
+    $('results').style.display = view === 'results' ? '' : 'none';
+    $('graph').style.display = view === 'graph' ? 'flex' : 'none';
+    if (view === 'graph') {
+      if (!g.loaded) post({ type: 'graph' });
+      renderGraph();
+    }
   });
 
   /* ---------- CSV ---------- */
