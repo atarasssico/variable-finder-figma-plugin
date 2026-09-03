@@ -1,0 +1,519 @@
+<style>
+  :root {
+    --teal: #002E3B;
+    --lime: #BEFE99;
+    --bg: var(--figma-color-bg, #fff);
+    --bg-alt: var(--figma-color-bg-secondary, #f5f5f5);
+    --bg-hover: var(--figma-color-bg-hover, #f0f0f0);
+    --text: var(--figma-color-text, #1a1a1a);
+    --text-dim: var(--figma-color-text-secondary, #6b6b6b);
+    --border: var(--figma-color-border, #e0e0e0);
+    --danger: var(--figma-color-text-danger, #b3261e);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 11px/1.45 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  #shell { flex: 1 1 auto; display: flex; min-height: 0; }
+  #left {
+    width: 340px; flex: 0 0 340px; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  #leftScroll { flex: 1 1 auto; overflow-y: auto; }
+  #right { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #results { flex: 1 1 auto; overflow-y: auto; }
+
+  .sect { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .sect > h4 {
+    margin: 0 0 7px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-dim); display: flex; align-items: center; gap: 6px;
+  }
+  .sect > h4 .count { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  .sect > h4 .toggle { cursor: pointer; text-transform: none; letter-spacing: 0; text-decoration: underline; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row + .row { margin-top: 7px; }
+
+  input[type="text"], textarea {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 5px; padding: 5px 7px; width: 100%; resize: vertical;
+  }
+  input[type="text"]:focus, textarea:focus { outline: 1px solid var(--teal); border-color: var(--teal); }
+  .hint { color: var(--text-dim); margin-top: 5px; }
+  button {
+    font: inherit; font-weight: 550; border: 1px solid transparent; border-radius: 5px;
+    padding: 6px 11px; cursor: pointer; white-space: nowrap;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  .primary { background: var(--teal); color: var(--lime); flex: 1 1 auto; }
+  .primary:hover:not(:disabled) { background: #01414f; }
+  .ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  .ghost:hover:not(:disabled) { background: var(--bg-hover); }
+  .mini { padding: 3px 7px; font-weight: 400; font-size: 10px; }
+  .link { background: none; border: none; padding: 0; color: var(--text-dim); text-decoration: underline; font-weight: 400; cursor: pointer; }
+
+  .list { overflow-y: auto; border: 1px solid var(--border); border-radius: 5px; margin-top: 7px; }
+  #varlist { max-height: 190px; }
+  #pagelist { max-height: 210px; }
+  .item { display: flex; align-items: center; gap: 7px; padding: 4px 8px; cursor: pointer; }
+  .item:hover { background: var(--bg-hover); }
+  .item + .item { border-top: 1px solid var(--border); }
+  .item input { margin: 0; accent-color: var(--teal); flex: 0 0 auto; }
+  .item.off .nm { opacity: .45; text-decoration: line-through; }
+  .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--text-dim); flex: 0 0 auto; }
+  .swatches { display: flex; gap: 3px; flex: 0 0 auto; }
+  .sw { width: 11px; height: 11px; border-radius: 3px; border: 1px solid var(--border); }
+  .child .nm { padding-left: 8px; }
+
+  .opts { display: flex; flex-direction: column; gap: 6px; color: var(--text-dim); }
+  .opts label { display: flex; align-items: flex-start; gap: 5px; cursor: pointer; }
+  .opts input { accent-color: var(--teal); margin: 1px 0 0; }
+
+  #actions { flex: 0 0 auto; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg-alt); }
+
+  #progress { flex: 0 0 auto; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--bg-alt); display: none; }
+  .bar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 6px; }
+  .bar > div { height: 100%; width: 0; background: var(--lime); transition: width .12s linear; }
+
+  .summary { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+  .summary b { font-size: 14px; }
+  .chip { background: var(--bg-alt); border-radius: 10px; padding: 1px 7px; color: var(--text-dim); }
+  .chip.alias { background: var(--lime); color: var(--teal); font-weight: 550; }
+  .chip.warn { color: var(--danger); }
+
+  .group { border-bottom: 1px solid var(--border); }
+  .ghead { display: flex; align-items: center; gap: 6px; padding: 6px 14px; cursor: pointer; }
+  .ghead:hover { background: var(--bg-hover); }
+  .ghead .caret { color: var(--text-dim); width: 8px; flex: 0 0 auto; }
+  .ghead .title { font-weight: 600; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub .ghead { padding-left: 26px; font-weight: 400; }
+  .hit { display: flex; align-items: center; gap: 6px; padding: 4px 14px 4px 44px; cursor: pointer; }
+  .hit:hover { background: var(--bg-hover); }
+  .hit .nm2 { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ty { color: var(--text-dim); flex: 0 0 auto; }
+  .fld { background: var(--bg-alt); border-radius: 3px; padding: 0 4px; color: var(--text-dim); flex: 0 0 auto; }
+  .variant, .inst { color: var(--text-dim); }
+
+  .state { padding: 46px 30px; text-align: center; color: var(--text-dim); }
+  .state h3 { margin: 0 0 6px; font-size: 12px; color: var(--text); }
+  .state p { margin: 0 auto; max-width: 320px; }
+  #error { display: none; padding: 8px 14px; background: var(--danger); color: #fff; }
+  footer { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 7px 14px; display: flex; gap: 8px; align-items: center; color: var(--text-dim); }
+  footer .spacer { flex: 1 1 auto; }
+</style>
+
+<div id="error"></div>
+
+<div id="shell">
+  <aside id="left">
+    <div id="leftScroll">
+      <div class="sect">
+        <h4>Variable <span class="count" id="varCount"></span></h4>
+        <input type="text" id="filter" placeholder="Filter by name, e.g. accent" autocomplete="off">
+        <div class="list" id="varlist"></div>
+        <div class="row">
+          <button class="ghost mini" id="selectAll">Select shown</button>
+          <button class="ghost mini" id="clearSel">Clear</button>
+        </div>
+      </div>
+
+      <div class="sect">
+        <h4>Pages <span class="count" id="pageCount"></span><span class="toggle" id="pagesToggle">show</span></h4>
+        <div id="pagesBody" style="display:none">
+          <input type="text" id="pageFilter" placeholder="Filter pages, e.g. Marketing" autocomplete="off">
+          <div class="row">
+            <button class="ghost mini" id="pgAll">All</button>
+            <button class="ghost mini" id="pgNone">None</button>
+            <button class="ghost mini" id="pgCurrent">Only current</button>
+          </div>
+          <div class="row">
+            <button class="ghost mini" id="pgExcludeShown">Exclude shown</button>
+            <button class="ghost mini" id="pgIncludeShown">Include shown</button>
+          </div>
+          <div class="list" id="pagelist"></div>
+        </div>
+      </div>
+
+      <div class="sect">
+        <h4>Exclude by name</h4>
+        <textarea id="excludeText" rows="2" placeholder="Icons, Lucide Icons/*, *Deprecated*"></textarea>
+        <div class="hint">Comma or line separated. Plain text matches any part of a layer name; add <b>*</b> for a whole-name glob. A match skips that layer and everything inside it, so it also works on component sets.</div>
+      </div>
+
+      <div class="sect">
+        <h4>Options</h4>
+        <div class="opts">
+          <label><input type="checkbox" id="followAliases"> <span>Follow aliases — also report layers that reach the variable through another variable</span></label>
+          <label><input type="checkbox" id="skipInstances"> <span>Skip inside instances — report the instance, don't walk its internals</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div id="actions">
+      <div class="row">
+        <button class="primary" id="scan" disabled>Scan</button>
+        <button class="ghost" id="cancel" style="display:none">Stop</button>
+      </div>
+    </div>
+  </aside>
+
+  <section id="right">
+    <div id="progress">
+      <div id="progressText">Scanning…</div>
+      <div class="bar"><div id="progressBar"></div></div>
+    </div>
+    <div id="results"></div>
+  </section>
+</div>
+
+<footer>
+  <span id="status">Pick a variable to map.</span>
+  <span class="spacer"></span>
+  <button class="link" id="copyCsv" style="display:none">Copy CSV</button>
+</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    variables: [], pages: [], currentPageId: null,
+    selected: new Set(), excludedPages: new Set(),
+    filter: '', pageFilter: '',
+    resultPages: [], hits: [], targets: [], open: new Set(),
+    scanning: false, done: false, cancelled: false, result: null, scanMeta: null,
+  };
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const post = (msg) => parent.postMessage({ pluginMessage: msg }, '*');
+
+  /* ---------- variables ---------- */
+
+  function shownVariables() {
+    const f = state.filter.trim().toLowerCase();
+    if (!f) return state.variables;
+    return state.variables.filter((v) => v.name.toLowerCase().includes(f) || v.collection.toLowerCase().includes(f));
+  }
+
+  function renderVarList() {
+    const list = shownVariables();
+    const el = $('varlist');
+    $('varCount').textContent = state.selected.size ? state.selected.size + ' selected' : '';
+    if (!state.variables.length) {
+      el.innerHTML = '<div class="state" style="padding:16px"><h3>No local variables</h3><p>This file defines none, so there is nothing to map.</p></div>';
+      return;
+    }
+    if (!list.length) {
+      el.innerHTML = '<div class="state" style="padding:16px">No variable matches “' + esc(state.filter) + '”.</div>';
+      return;
+    }
+    el.innerHTML = list.slice(0, 400).map((v) => {
+      const sw = v.previews.map((p) => p.hex
+        ? '<span class="sw" style="background:' + esc(p.hex) + '" title="' + esc(p.mode + ': ' + p.hex) + '"></span>'
+        : '<span class="meta" title="' + esc(p.mode) + '">' + esc(p.text) + '</span>').join('');
+      return '<label class="item" data-id="' + esc(v.id) + '">' +
+        '<input type="checkbox" ' + (state.selected.has(v.id) ? 'checked' : '') + '>' +
+        '<span class="nm" title="' + esc(v.name) + '">' + esc(v.name) + '</span>' +
+        '<span class="swatches">' + sw + '</span>' +
+        '<span class="meta">' + esc(v.collection) + '</span></label>';
+    }).join('') + (list.length > 400 ? '<div class="state" style="padding:8px">' + (list.length - 400) + ' more — narrow the filter.</div>' : '');
+  }
+
+  /* ---------- pages ---------- */
+
+  function shownPages() {
+    const f = state.pageFilter.trim().toLowerCase();
+    if (!f) return state.pages;
+    return state.pages.filter((p) => p.name.toLowerCase().includes(f));
+  }
+
+  function renderPageList() {
+    const included = state.pages.length - state.excludedPages.size;
+    $('pageCount').textContent = state.excludedPages.size
+      ? included + ' of ' + state.pages.length
+      : 'all ' + state.pages.length;
+    if ($('pagesBody').style.display === 'none') return;
+
+    const list = shownPages();
+    const el = $('pagelist');
+    if (!list.length) {
+      el.innerHTML = '<div class="state" style="padding:16px">No page matches “' + esc(state.pageFilter) + '”.</div>';
+      return;
+    }
+    el.innerHTML = list.map((p) => {
+      const off = state.excludedPages.has(p.id);
+      const child = /^[\s↳-]+/.test(p.name) ? ' child' : '';
+      const label = p.name.replace(/^[\s↳]+/, '').trim() || '(unnamed)';
+      return '<label class="item' + (off ? ' off' : '') + child + '" data-id="' + esc(p.id) + '">' +
+        '<input type="checkbox" ' + (off ? '' : 'checked') + '>' +
+        '<span class="nm" title="' + esc(p.name) + '">' + esc(label) + '</span>' +
+        (p.id === state.currentPageId ? '<span class="meta">current</span>' : '') + '</label>';
+    }).join('');
+  }
+
+  function syncScanButton() {
+    const noPages = state.excludedPages.size >= state.pages.length;
+    $('scan').disabled = state.scanning || state.selected.size === 0 || noPages;
+    $('scan').textContent = noPages ? 'Every page excluded'
+      : state.selected.size > 1 ? 'Scan ' + state.selected.size + ' variables' : 'Scan';
+  }
+
+  /* ---------- input wiring ---------- */
+
+  $('filter').addEventListener('input', (e) => { state.filter = e.target.value; renderVarList(); });
+  $('varlist').addEventListener('change', (e) => {
+    const item = e.target.closest('.item');
+    if (!item) return;
+    if (e.target.checked) state.selected.add(item.dataset.id); else state.selected.delete(item.dataset.id);
+    renderVarList(); syncScanButton();
+  });
+  $('selectAll').addEventListener('click', () => {
+    shownVariables().slice(0, 400).forEach((v) => state.selected.add(v.id));
+    renderVarList(); syncScanButton();
+  });
+  $('clearSel').addEventListener('click', () => { state.selected.clear(); renderVarList(); syncScanButton(); });
+
+  $('pagesToggle').addEventListener('click', () => {
+    const body = $('pagesBody');
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    $('pagesToggle').textContent = open ? 'show' : 'hide';
+    renderPageList();
+  });
+  $('pageFilter').addEventListener('input', (e) => { state.pageFilter = e.target.value; renderPageList(); });
+  $('pagelist').addEventListener('change', (e) => {
+    const item = e.target.closest('.item');
+    if (!item) return;
+    if (e.target.checked) state.excludedPages.delete(item.dataset.id); else state.excludedPages.add(item.dataset.id);
+    renderPageList(); syncScanButton();
+  });
+  $('pgAll').addEventListener('click', () => { state.excludedPages.clear(); renderPageList(); syncScanButton(); });
+  $('pgNone').addEventListener('click', () => { state.pages.forEach((p) => state.excludedPages.add(p.id)); renderPageList(); syncScanButton(); });
+  $('pgCurrent').addEventListener('click', () => {
+    state.excludedPages = new Set(state.pages.filter((p) => p.id !== state.currentPageId).map((p) => p.id));
+    renderPageList(); syncScanButton();
+  });
+  $('pgExcludeShown').addEventListener('click', () => { shownPages().forEach((p) => state.excludedPages.add(p.id)); renderPageList(); syncScanButton(); });
+  $('pgIncludeShown').addEventListener('click', () => { shownPages().forEach((p) => state.excludedPages.delete(p.id)); renderPageList(); syncScanButton(); });
+
+  $('scan').addEventListener('click', () => {
+    state.resultPages = []; state.hits = []; state.open = new Set();
+    state.done = false; state.cancelled = false; state.result = null; state.scanning = true;
+    $('error').style.display = 'none';
+    $('progress').style.display = 'block';
+    $('progressBar').style.width = '0';
+    $('cancel').style.display = 'inline-block';
+    $('copyCsv').style.display = 'none';
+    syncScanButton();
+    render();
+    post({
+      type: 'scan',
+      variableIds: Array.from(state.selected),
+      excludedPageIds: Array.from(state.excludedPages),
+      excludeText: $('excludeText').value,
+      followAliases: $('followAliases').checked,
+      skipInsideInstances: $('skipInstances').checked,
+    });
+  });
+  $('cancel').addEventListener('click', () => { post({ type: 'cancel' }); $('cancel').disabled = true; });
+
+  /* ---------- plugin messages ---------- */
+
+  onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+
+    if (msg.type === 'init-data') {
+      state.variables = msg.variables;
+      state.pages = msg.pages;
+      state.currentPageId = msg.currentPageId;
+      if (msg.settings) {
+        const known = new Set(msg.pages.map((p) => p.id));
+        (msg.settings.excludedPageIds || []).forEach((id) => { if (known.has(id)) state.excludedPages.add(id); });
+        $('excludeText').value = msg.settings.excludeText || '';
+        $('followAliases').checked = !!msg.settings.followAliases;
+        $('skipInstances').checked = !!msg.settings.skipInsideInstances;
+      }
+      renderVarList(); renderPageList(); syncScanButton();
+      $('status').textContent = msg.variables.length + ' variables · ' + msg.pages.length + ' pages · ' + msg.fileName;
+    }
+
+    if (msg.type === 'scan-start') {
+      state.targets = msg.targets;
+      state.scanMeta = msg;
+      $('progressText').textContent = 'Scanning 0 / ' + msg.totalPages + ' pages…';
+    }
+
+    if (msg.type === 'page-done') {
+      if (msg.hits.length) {
+        state.resultPages.push({ id: msg.pageId, name: msg.pageName, hits: msg.hits });
+        state.hits = state.hits.concat(msg.hits);
+      }
+      $('progressBar').style.width = (((msg.index + 1) / msg.totalPages) * 100) + '%';
+      $('progressText').textContent = 'Scanning ' + (msg.index + 1) + ' / ' + msg.totalPages +
+        ' pages · ' + msg.totalHits + ' bindings · ' + msg.nodesScanned.toLocaleString() + ' layers';
+      render();
+    }
+
+    if (msg.type === 'scan-done') {
+      state.scanning = false; state.done = true; state.cancelled = msg.cancelled; state.result = msg;
+      $('progress').style.display = 'none';
+      $('cancel').style.display = 'none';
+      $('cancel').disabled = false;
+      $('copyCsv').style.display = state.hits.length ? 'inline-block' : 'none';
+      $('status').textContent = msg.nodesScanned.toLocaleString() + ' layers scanned' +
+        (msg.prunedSubtrees ? ' · ' + msg.prunedSubtrees.toLocaleString() + ' skipped by name' : '') +
+        (msg.cancelled ? ' · stopped early' : '');
+      syncScanButton();
+      render();
+    }
+
+    if (msg.type === 'revealed') {
+      $('status').textContent = 'Selected ' + msg.count + ' layer' + (msg.count === 1 ? '' : 's') + ' on canvas.';
+    }
+
+    if (msg.type === 'error') {
+      state.scanning = false;
+      $('progress').style.display = 'none';
+      $('cancel').style.display = 'none';
+      $('error').style.display = 'block';
+      $('error').textContent = msg.message;
+      syncScanButton();
+    }
+  };
+
+  /* ---------- results ---------- */
+
+  function groupKey(h) {
+    if (h.componentSet) return { label: h.componentSet, kind: 'Component set' };
+    if (h.component) return { label: h.component, kind: 'Component' };
+    if (h.instance) return { label: h.instance, kind: 'Instance' };
+    return { label: h.topLevel, kind: 'Frame' };
+  }
+
+  function render() {
+    const out = $('results');
+
+    if (!state.resultPages.length) {
+      if (state.scanning) { out.innerHTML = '<div class="state">Working through the document…</div>'; return; }
+      if (state.done) {
+        const names = state.targets.map((t) => t.name).join(', ');
+        if (state.result && state.result.noPages) {
+          out.innerHTML = '<div class="state"><h3>Nothing to scan</h3><p>Every page is excluded. Include at least one under Pages.</p></div>';
+          return;
+        }
+        out.innerHTML = '<div class="state"><h3>No layer binds ' + esc(names) + '</h3><p>' +
+          ($('followAliases').checked
+            ? 'Nothing references it directly or through an alias, within the pages you scanned.'
+            : 'It may only be reached through another variable that aliases it. Turn on <b>Follow aliases</b> and scan again.') +
+          '</p></div>';
+        return;
+      }
+      out.innerHTML = '<div class="state"><h3>Map a variable</h3><p>Tick one or more variables on the left, narrow the scan with page or name exclusions, then Scan. Results land here grouped by page and component.</p></div>';
+      return;
+    }
+
+    const totals = {};
+    state.hits.forEach((h) => { totals[h.variable] = (totals[h.variable] || 0) + 1; });
+    const distinct = new Set(state.hits.map((h) => groupKey(h).label)).size;
+
+    let html = '<div class="summary"><b>' + state.hits.length + '</b> bindings' +
+      ' <span class="chip">' + state.resultPages.length + ' pages</span>' +
+      ' <span class="chip">' + distinct + ' components</span>';
+    Object.keys(totals).sort((a, b) => totals[b] - totals[a]).forEach((name) => {
+      const t = state.targets.find((x) => x.name === name);
+      html += ' <span class="chip' + (t && t.via ? ' alias' : '') + '">' + esc(name) + ': ' + totals[name] +
+        (t && t.via ? ' via ' + esc(t.via) : '') + '</span>';
+    });
+    if (state.scanMeta && state.scanMeta.skippedPages) html += ' <span class="chip">' + state.scanMeta.skippedPages + ' pages excluded</span>';
+    if (state.result && state.result.prunedSubtrees) html += ' <span class="chip">' + state.result.prunedSubtrees.toLocaleString() + ' layers skipped by name</span>';
+    if (state.result && state.result.truncated) html += ' <span class="chip warn">list capped at 8000</span>';
+    if (state.cancelled) html += ' <span class="chip warn">stopped early</span>';
+    html += '</div>';
+
+    state.resultPages.forEach((page, pi) => {
+      const openPage = state.open.has('p' + pi);
+      html += '<div class="group"><div class="ghead" data-toggle="p' + pi + '" data-page="' + esc(page.id) + '">' +
+        '<span class="caret">' + (openPage ? '▾' : '▸') + '</span>' +
+        '<span class="title">' + esc(page.name.trim() || '(unnamed page)') + '</span>' +
+        '<span class="chip">' + page.hits.length + '</span></div>';
+
+      if (openPage) {
+        const groups = new Map();
+        page.hits.forEach((h) => {
+          const k = groupKey(h);
+          const key = k.kind + '|' + k.label;
+          if (!groups.has(key)) groups.set(key, { label: k.label, kind: k.kind, hits: [] });
+          groups.get(key).hits.push(h);
+        });
+        html += '<div class="sub">';
+        Array.from(groups.values()).sort((a, b) => b.hits.length - a.hits.length).forEach((g, gi) => {
+          const gkey = 'g' + pi + '_' + gi;
+          const openGroup = state.open.has(gkey);
+          html += '<div class="group"><div class="ghead" data-toggle="' + gkey + '" data-page="' + esc(page.id) +
+            '" data-nodes="' + g.hits.map((h) => h.nodeId).join(',') + '">' +
+            '<span class="caret">' + (openGroup ? '▾' : '▸') + '</span>' +
+            '<span class="title">' + esc(g.label) + '</span>' +
+            '<span class="meta">' + g.kind + '</span><span class="chip">' + g.hits.length + '</span></div>';
+          if (openGroup) {
+            g.hits.forEach((h) => {
+              html += '<div class="hit" data-page="' + esc(page.id) + '" data-nodes="' + esc(h.nodeId) +
+                '" title="' + esc(h.fields.join(', ')) + '">' +
+                '<span class="nm2">' + esc(h.nodeName === h.variant ? 'component root' : h.nodeName) +
+                (h.variant ? ' <span class="variant">· ' + esc(h.variant) + '</span>' : '') +
+                (h.insideInstance && h.instance !== g.label ? ' <span class="inst">· in ' + esc(h.instance) + '</span>' : '') +
+                '</span>' +
+                '<span class="fld">' + esc(h.variable) + '</span>' +
+                h.fields.slice(0, 3).map((f) => '<span class="fld">' + esc(f) + '</span>').join('') +
+                '<span class="ty">' + esc(h.nodeType.toLowerCase()) + '</span></div>';
+            });
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+
+    out.innerHTML = html;
+  }
+
+  $('results').addEventListener('click', (e) => {
+    const head = e.target.closest('.ghead');
+    if (head) {
+      const key = head.dataset.toggle;
+      if (state.open.has(key)) state.open.delete(key); else state.open.add(key);
+      render();
+      return;
+    }
+    const hit = e.target.closest('.hit');
+    if (hit) post({ type: 'reveal', pageId: hit.dataset.page, nodeIds: hit.dataset.nodes.split(',') });
+  });
+
+  $('results').addEventListener('dblclick', (e) => {
+    const head = e.target.closest('.ghead');
+    if (head && head.dataset.nodes) post({ type: 'reveal', pageId: head.dataset.page, nodeIds: head.dataset.nodes.split(',') });
+  });
+
+  /* ---------- CSV ---------- */
+
+  $('copyCsv').addEventListener('click', () => {
+    const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+    const rows = [['variable', 'via_alias', 'page', 'component_set', 'component', 'variant', 'instance', 'layer', 'type', 'properties', 'node_id'].join(',')];
+    state.resultPages.forEach((page) => page.hits.forEach((h) => rows.push([
+      q(h.variable), q(h.via || ''), q(page.name), q(h.componentSet || ''), q(h.component || ''),
+      q(h.variant || ''), q(h.instance || ''), q(h.nodeName), q(h.nodeType), q(h.fields.join(' ')), q(h.nodeId),
+    ].join(','))));
+    const ta = document.createElement('textarea');
+    ta.value = rows.join('\n');
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    document.body.removeChild(ta);
+    $('status').textContent = ok ? state.hits.length + ' rows copied as CSV.' : 'Copy blocked by the browser.';
+  });
+
+  post({ type: 'init' });
+  render();
+</script>

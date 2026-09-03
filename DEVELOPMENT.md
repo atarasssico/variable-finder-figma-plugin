@@ -1,0 +1,67 @@
+# Development notes
+
+## Why this exists
+
+The community plugins for this job throw on all-pages mode:
+
+> Error: in findAll: Cannot access method `findAll()` on a page that has not been explicitly loaded.
+
+That is a bug in those plugins, not a setting. Under Figma's `documentAccess: "dynamic-page"`
+model only the current page is in memory; `figma.root.findAll()` requires an awaited
+`figma.loadAllPagesAsync()` (or `page.loadAsync()` per page) first, and they never call it.
+Community plugin source is not editable locally, hence this.
+
+## Files
+
+| File | Role |
+|---|---|
+| `manifest.json` | `documentAccess: "dynamic-page"`, `networkAccess: none` |
+| `code.js` | Plugin sandbox: variable/page enumeration, per-page scan, alias graph, reveal-on-canvas, `clientStorage` settings |
+| `ui.html` | Whole UI, inline CSS + JS, no build step |
+
+No build, no dependencies. Import via **Plugins > Development > Import plugin from manifest…**
+
+## Architecture
+
+Scan is an explicit-stack DFS per page, not `findAll`, so a name-pattern match can prune a
+whole subtree cheaply and progress can be reported between pages.
+
+`boundVariables` mixes three shapes — a plain alias (`opacity`), arrays of aliases (`fills`,
+`strokes`, `effects`) and nested maps (`componentProperties`). `walk()` handles all of them
+and labels each hit with its property path (`fills[0]`, `property:Label`). Instance
+component-property bindings are collected separately.
+
+Location for a hit is derived by walking ancestors once, on hit only, to find the nearest
+component set, component, and host instance, plus the top-level frame. Variant strings come
+from `variantProperties`, falling back to VARIANT-typed `componentProperties` for instances.
+
+"Follow aliases" builds a reverse alias graph over local variables (referenced -> consumers)
+and BFSes it, so a primitive with zero direct bindings still reports the layers that reach
+it through a semantic variable.
+
+## Performance
+
+`figma.loadAllPagesAsync()` on a 178-page library exceeds 30s. `page.loadAsync()` per page
+runs roughly 5s per 50k nodes and keeps the UI responsive, which is why the scan streams
+per-page results and can be stopped.
+
+If you drive this file's logic through an MCP Figma bridge for testing, note that a timed-out
+`loadAllPagesAsync()` wedges the plugin sandbox for several minutes — every subsequent
+execute times out until it clears.
+
+## Verification state
+
+| Part | Status |
+|---|---|
+| `collectBindings`, `describe`, variant strings, property paths, per-page totals | Verified against a 178-page, ~434k-node library. Component set, variant, host instance and field labels all resolve; per-page totals matched an independent scan. |
+| `code.js` and `ui.html` syntax | Verified with `node --check` (UI script extracted from the HTML). |
+| Exclusion pruning (page checklist + name patterns) | Not run live. Straightforward extension of the verified walker, but never executed. |
+| Two-pane layout, page checklist rendering, `clientStorage` persistence, CSV copy, reveal-on-canvas | Not run live. A local dev plugin cannot be driven from an MCP bridge. |
+
+## Not implemented
+
+- Library (remote) variables in the picker — local only.
+- Per-character text range bindings via `getRangeBoundVariable`.
+- Variable references from paint/text styles.
+- Result list caps at 8000 rows; counts stay accurate above that.
+- Window resize handle.
