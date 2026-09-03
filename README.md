@@ -4,6 +4,10 @@ Figma plugin. Finds every layer in the **whole document** bound to a chosen vari
 and shows where it lives: page, component set, variant, host instance, layer, and which
 property is bound.
 
+<img width="600" height="auto" alt="Screenshot 2026-09-03 at 08 50 19" src="https://github.com/user-attachments/assets/b851ae84-68a2-48f1-8942-d34bfff8a1db" />
+<img width="600" height="auto" alt="Screenshot 2026-09-03 at 08 53 33" src="https://github.com/user-attachments/assets/a8fa1f40-380e-4d67-81b2-a7d9dd8d1804" />
+
+
 Built because usage-finder plugins written before Figma's dynamic-page migration fail on
 all-pages mode with `Cannot access method findAll() on a page that has not been explicitly
 loaded`. This one loads each page individually as it walks, so it works on large libraries
