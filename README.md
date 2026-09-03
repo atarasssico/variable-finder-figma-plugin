@@ -45,6 +45,10 @@ rather than just filtering output. The summary reports how many layers were skip
   appear tagged `via accent`.
 - **Skip inside instances** — reports the instance itself but does not walk its internals.
   Much faster and far less noise when you only care about main components.
+- **Skip hidden layers inside instances** — on by default. Uses Figma's own
+  `skipInvisibleInstanceChildren` traversal fast path, which is a large speedup on big
+  documents. Note it genuinely skips those layers, so a binding that only exists on a
+  hidden layer inside an instance will not be reported. Turn it off for an exhaustive pass.
 
 ## Limitations
 

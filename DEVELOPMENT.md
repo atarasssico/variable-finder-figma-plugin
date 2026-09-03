@@ -45,6 +45,19 @@ it through a semantic variable.
 runs roughly 5s per 50k nodes and keeps the UI responsive, which is why the scan streams
 per-page results and can be stopped.
 
+Four things keep a whole-document scan from feeling stuck:
+
+- `figma.skipInvisibleInstanceChildren` is set from the matching option (default on), so
+  traversal skips hidden layers inside instances.
+- `collectBindings()` returns `null` instead of an empty array, and pre-checks
+  `boundVariables` for emptiness, so the common no-bindings node costs no allocation.
+- The inner DFS flushes a `tick` message and yields with `setTimeout(0)` on a 120ms budget,
+  checked every 2048 nodes. Without it a single 200k-layer page would post nothing from
+  start to finish. Yielding also stops the scan from freezing the Figma window.
+- The UI throttles full result re-renders to once per 250ms while streaming, and the
+  progress bar's stripe and sweep are pure CSS, so they keep moving even when the sandbox
+  is busy and posting nothing. Both respect `prefers-reduced-motion`.
+
 If you drive this file's logic through an MCP Figma bridge for testing, note that a timed-out
 `loadAllPagesAsync()` wedges the plugin sandbox for several minutes — every subsequent
 execute times out until it clears.

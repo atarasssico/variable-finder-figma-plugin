@@ -77,8 +77,36 @@
   #actions { flex: 0 0 auto; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg-alt); }
 
   #progress { flex: 0 0 auto; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--bg-alt); display: none; }
-  .bar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 6px; }
-  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+  #progress .prow { display: flex; align-items: center; gap: 7px; }
+  #progress .prow .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #progressText { margin-top: 5px; color: var(--text-dim); }
+  .spinner {
+    width: 11px; height: 11px; flex: 0 0 auto; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Two independent motions: the fill's stripes and a sweep across the track.
+     Both are CSS-driven, so they keep moving even while the plugin sandbox is
+     mid-page and posting nothing. */
+  .bar { position: relative; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 6px; }
+  .bar > div {
+    height: 100%; width: 0; background-color: var(--accent); transition: width .2s linear;
+    background-image: linear-gradient(90deg, rgba(255, 255, 255, .45) 0 6px, transparent 6px 14px);
+    background-size: 14px 100%;
+    animation: stripe .55s linear infinite;
+  }
+  @keyframes stripe { to { background-position: 14px 0; } }
+  .bar::after {
+    content: ''; position: absolute; top: 0; left: 0; height: 100%; width: 35%;
+    background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+    animation: sweep 1.5s ease-in-out infinite;
+  }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(285%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner, .bar > div, .bar::after { animation: none; }
+  }
 
   .summary { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
   .summary b { font-size: 14px; }
@@ -150,6 +178,7 @@
         <div class="opts">
           <label><input type="checkbox" id="followAliases"> <span>Follow aliases — also report layers that reach the variable through another variable</span></label>
           <label><input type="checkbox" id="skipInstances"> <span>Skip inside instances — report the instance, don't walk its internals</span></label>
+          <label><input type="checkbox" id="skipHidden" checked> <span>Skip hidden layers inside instances — Figma's own traversal fast path, much quicker on big files</span></label>
         </div>
       </div>
     </div>
@@ -164,8 +193,13 @@
 
   <section id="right">
     <div id="progress">
-      <div id="progressText">Scanning…</div>
+      <div class="prow">
+        <span class="spinner"></span>
+        <span class="grow" id="progressPage">Starting…</span>
+        <span class="meta" id="progressEta"></span>
+      </div>
       <div class="bar"><div id="progressBar"></div></div>
+      <div id="progressText"></div>
     </div>
     <div id="results"></div>
   </section>
@@ -186,6 +220,23 @@
     resultPages: [], hits: [], targets: [], open: new Set(),
     scanning: false, done: false, cancelled: false, result: null, scanMeta: null,
   };
+
+  let renderTimer = null;
+  let lastRender = 0;
+  // Full re-render of a long result list is expensive; cap it while a scan streams.
+  function scheduleRender(force) {
+    if (force) {
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      lastRender = Date.now();
+      render();
+      return;
+    }
+    const since = Date.now() - lastRender;
+    if (since >= 250) { lastRender = Date.now(); render(); }
+    else if (!renderTimer) {
+      renderTimer = setTimeout(() => { renderTimer = null; lastRender = Date.now(); render(); }, 250 - since);
+    }
+  }
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const post = (msg) => parent.postMessage({ pluginMessage: msg }, '*');
@@ -316,6 +367,7 @@
       excludeText: $('excludeText').value,
       followAliases: $('followAliases').checked,
       skipInsideInstances: $('skipInstances').checked,
+      skipHiddenInInstances: $('skipHidden').checked,
     });
   });
   $('cancel').addEventListener('click', () => { post({ type: 'cancel' }); $('cancel').disabled = true; });
@@ -336,6 +388,7 @@
         $('excludeText').value = msg.settings.excludeText || '';
         $('followAliases').checked = !!msg.settings.followAliases;
         $('skipInstances').checked = !!msg.settings.skipInsideInstances;
+        if (msg.settings.skipHiddenInInstances !== undefined) $('skipHidden').checked = !!msg.settings.skipHiddenInInstances;
       }
       renderVarList(); renderPageList(); syncScanButton();
       $('status').textContent = msg.variables.length + ' variables · ' + msg.pages.length + ' pages · ' + msg.fileName;
@@ -344,7 +397,22 @@
     if (msg.type === 'scan-start') {
       state.targets = msg.targets;
       state.scanMeta = msg;
-      $('progressText').textContent = 'Scanning 0 / ' + msg.totalPages + ' pages…';
+      state.scanStart = Date.now();
+      state.pagesDone = 0;
+      $('progressPage').textContent = 'Loading first page…';
+      $('progressEta').textContent = '';
+      $('progressText').textContent = '0 of ' + msg.totalPages + ' pages';
+    }
+
+    if (msg.type === 'page-start') {
+      $('progressPage').textContent = 'Page ' + (msg.index + 1) + ' of ' + msg.totalPages +
+        ' · ' + (msg.pageName.trim() || '(unnamed)');
+    }
+
+    // Mid-page heartbeat. Big pages hold hundreds of thousands of layers, so
+    // without these the counters would freeze between page-done messages.
+    if (msg.type === 'tick') {
+      updateCounters(msg, false);
     }
 
     if (msg.type === 'page-done') {
@@ -352,10 +420,10 @@
         state.resultPages.push({ id: msg.pageId, name: msg.pageName, hits: msg.hits });
         state.hits = state.hits.concat(msg.hits);
       }
-      $('progressBar').style.width = (((msg.index + 1) / msg.totalPages) * 100) + '%';
-      $('progressText').textContent = 'Scanning ' + (msg.index + 1) + ' / ' + msg.totalPages +
-        ' pages · ' + msg.totalHits + ' bindings · ' + msg.nodesScanned.toLocaleString() + ' layers';
-      render();
+      state.pagesDone = msg.index + 1;
+      $('progressBar').style.width = ((state.pagesDone / msg.totalPages) * 100) + '%';
+      updateCounters(msg, true);
+      scheduleRender();
     }
 
     if (msg.type === 'scan-done') {
@@ -368,7 +436,7 @@
         (msg.prunedSubtrees ? ' · ' + msg.prunedSubtrees.toLocaleString() + ' skipped by name' : '') +
         (msg.cancelled ? ' · stopped early' : '');
       syncScanButton();
-      render();
+      scheduleRender(true);
     }
 
     if (msg.type === 'revealed') {
@@ -384,6 +452,30 @@
       syncScanButton();
     }
   };
+
+  function updateCounters(msg, pageComplete) {
+    const done = pageComplete ? msg.index + 1 : msg.index;
+    const parts = [done + ' of ' + msg.totalPages + ' pages',
+      msg.totalHits.toLocaleString() + ' bindings',
+      msg.nodesScanned.toLocaleString() + ' layers'];
+
+    const elapsed = (Date.now() - state.scanStart) / 1000;
+    if (elapsed > 0.5) parts.push(Math.round(msg.nodesScanned / elapsed).toLocaleString() + ' layers/s');
+    $('progressText').textContent = parts.join(' · ');
+
+    // Page counts are wildly uneven, so estimate from layers where we can and
+    // fall back to page pace early on. Deliberately vague wording.
+    if (done >= 3 && done < msg.totalPages) {
+      const remaining = (elapsed / done) * (msg.totalPages - done);
+      $('progressEta').textContent = remaining > 90
+        ? '~' + Math.ceil(remaining / 60) + ' min left'
+        : '~' + Math.max(1, Math.round(remaining / 5) * 5) + 's left';
+    }
+    if (!pageComplete && msg.queued) {
+      $('progressPage').textContent = 'Page ' + (msg.index + 1) + ' of ' + msg.totalPages +
+        ' · ' + (msg.pageName.trim() || '(unnamed)') + ' · ' + msg.queued.toLocaleString() + ' layers queued';
+    }
+  }
 
   /* ---------- results ---------- */
 

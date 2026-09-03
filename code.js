@@ -134,17 +134,28 @@ function walk(obj, prefix, out, depth) {
   }
 }
 
+function isEmpty(obj) {
+  for (const k in obj) return false;
+  return true;
+}
+
+// Returns null rather than an empty array: this runs once per node, so skipping
+// the allocation matters on documents with hundreds of thousands of layers.
 function collectBindings(node) {
+  const bv = node.boundVariables;
+  const props = node.type === 'INSTANCE' ? node.componentProperties : null;
+  const noBv = !bv || isEmpty(bv);
+  if (noBv && !props) return null;
+
   const out = [];
-  if (node.boundVariables) walk(node.boundVariables, '', out, 0);
-  if (node.type === 'INSTANCE' && node.componentProperties) {
-    const props = node.componentProperties;
+  if (!noBv) walk(bv, '', out, 0);
+  if (props) {
     for (const key in props) {
       const p = props[key];
       if (p && p.boundVariables) walk(p.boundVariables, 'property:' + key.split('#')[0], out, 0);
     }
   }
-  return out;
+  return out.length ? out : null;
 }
 
 /* ---------- location description ---------- */
@@ -202,6 +213,7 @@ async function runScan(opts) {
       excludeText: opts.excludeText || '',
       followAliases: !!opts.followAliases,
       skipInsideInstances: !!opts.skipInsideInstances,
+      skipHiddenInInstances: opts.skipHiddenInInstances !== false,
     });
   } catch (err) {
     /* storage is best effort */
@@ -243,10 +255,15 @@ async function runScan(opts) {
     }
   }
 
+  // Documented fast path: traversal skips hidden layers inside instances.
+  figma.skipInvisibleInstanceChildren = opts.skipHiddenInInstances !== false;
+
   const excluded = new Set(opts.excludedPageIds || []);
   const pages = figma.root.children.filter((p) => !excluded.has(p.id));
   const matchers = compilePatterns(opts.excludeText);
 
+  const FLUSH_MS = 120;
+  let lastFlush = Date.now();
   let nodesScanned = 0;
   let totalHits = 0;
   let prunedSubtrees = 0;
@@ -270,13 +287,35 @@ async function runScan(opts) {
   for (let p = 0; p < pages.length; p++) {
     if (state.cancel) break;
     const page = pages[p];
+    figma.ui.postMessage({ type: 'page-start', index: p, totalPages: pages.length, pageName: page.name });
     await page.loadAsync();
 
     const hits = [];
     const stack = [];
     for (let i = page.children.length - 1; i >= 0; i--) stack.push(page.children[i]);
 
+    let sinceCheck = 0;
     while (stack.length) {
+      // Yield on a time budget, not a node count: one page can hold 200k layers,
+      // and without this the UI gets no message until the whole page is done.
+      if (++sinceCheck >= 2048) {
+        sinceCheck = 0;
+        const now = Date.now();
+        if (now - lastFlush >= FLUSH_MS) {
+          lastFlush = now;
+          figma.ui.postMessage({
+            type: 'tick',
+            index: p,
+            totalPages: pages.length,
+            pageName: page.name,
+            nodesScanned,
+            totalHits,
+            queued: stack.length,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
       const node = stack.pop();
 
       let skip = false;
@@ -288,7 +327,7 @@ async function runScan(opts) {
       nodesScanned++;
 
       const bindings = collectBindings(node);
-      if (bindings.length) {
+      if (bindings) {
         const matched = new Map();
         for (const b of bindings) {
           if (!targets.has(b.id)) continue;
