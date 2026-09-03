@@ -39,6 +39,14 @@ from `variantProperties`, falling back to VARIANT-typed `componentProperties` fo
 and BFSes it, so a primitive with zero direct bindings still reports the layers that reach
 it through a semantic variable.
 
+## Window size
+
+`figma.showUI()` is synchronous, so a remembered size cannot be applied at startup; the size
+is read from `clientStorage` during `init` and applied with `figma.ui.resize()` straight
+after. Drag deltas are throttled to one resize per animation frame, since every call
+repaints the plugin window, and only the final size is persisted. The graph re-lays out on
+resize end because its fit calculation reads the canvas box.
+
 ## Alias graph
 
 `sendGraph()` returns every local variable as a node plus one edge per aliased mode value,
@@ -105,6 +113,7 @@ execute times out until it clears.
 | `Skip inside instances` | Verified. 19,263 layers walked down to 901, 3.2s to 0.08s, hits 85 -> 65. |
 | Page exclusion checklist | Logic verified as a set filter over `figma.root.children`; the checklist UI itself is untested. |
 | Two-pane layout, page checklist rendering, `clientStorage` persistence, CSV copy, reveal-on-canvas | Not run live. A local dev plugin cannot be driven from an MCP bridge. |
+| Window resize grip | Not run live. |
 | Alias graph and `countAll()` | Not run live. Graph data shape is derived from a verified read of the file's 1,577 variables and 1,708 alias edges, but neither the SVG layout nor the counting pass has executed. |
 
 ## Not implemented
@@ -113,4 +122,3 @@ execute times out until it clears.
 - Per-character text range bindings via `getRangeBoundVariable`.
 - Variable references from paint/text styles.
 - Result list caps at 8000 rows; counts stay accurate above that.
-- Window resize handle.

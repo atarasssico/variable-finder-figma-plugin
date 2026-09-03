@@ -7,9 +7,14 @@
 
 const MAX_HITS = 8000;
 const SETTINGS_KEY = 'vum-settings-' + (figma.fileKey || figma.root.id);
+const SIZE_KEY = 'vum-size';
+const MIN_W = 460, MIN_H = 420, MAX_W = 2000, MAX_H = 1600;
+const DEFAULT_W = 920, DEFAULT_H = 680;
 const state = { scanning: false, cancel: false };
 
-figma.showUI(__html__, { width: 920, height: 680, themeColors: true });
+figma.showUI(__html__, { width: DEFAULT_W, height: DEFAULT_H, themeColors: true });
+
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n || 0)));
 
 figma.ui.onmessage = async (msg) => {
   try {
@@ -19,11 +24,23 @@ figma.ui.onmessage = async (msg) => {
     if (msg.type === 'scan') return await runScan(msg);
     if (msg.type === 'cancel') { state.cancel = true; return; }
     if (msg.type === 'reveal') return await reveal(msg.pageId, msg.nodeIds);
+    if (msg.type === 'resize') return resizeUi(msg.width, msg.height, msg.remember);
   } catch (err) {
     state.scanning = false;
     figma.ui.postMessage({ type: 'error', message: (err && err.message) || String(err) });
   }
 };
+
+/* ---------- window size ---------- */
+
+function resizeUi(width, height, remember) {
+  const w = clamp(width, MIN_W, MAX_W);
+  const h = clamp(height, MIN_H, MAX_H);
+  figma.ui.resize(w, h);
+  if (remember) {
+    figma.clientStorage.setAsync(SIZE_KEY, { w, h }).catch(() => {});
+  }
+}
 
 /* ---------- init: variables, pages, saved settings ---------- */
 
@@ -76,6 +93,15 @@ async function sendInit() {
     settings = null;
   }
 
+  // showUI() is synchronous, so the remembered size can only be applied once
+  // clientStorage has been read.
+  try {
+    const size = await figma.clientStorage.getAsync(SIZE_KEY);
+    if (size && size.w && size.h) figma.ui.resize(clamp(size.w, MIN_W, MAX_W), clamp(size.h, MIN_H, MAX_H));
+  } catch (err) {
+    /* keep the default size */
+  }
+
   figma.ui.postMessage({
     type: 'init-data',
     variables,
@@ -83,6 +109,7 @@ async function sendInit() {
     settings: settings || null,
     fileName: figma.root.name,
     currentPageId: figma.currentPage.id,
+    defaultSize: { w: DEFAULT_W, h: DEFAULT_H },
   });
 }
 

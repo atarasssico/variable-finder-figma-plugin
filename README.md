@@ -26,6 +26,12 @@ property is bound.
 4. Expand a page, then a component set. Click a row to jump: it switches page, selects the layer and zooms to it. Double-click a group header to select every match in that group at once.
 5. **Copy CSV** exports the full table.
 
+## Window size
+
+Drag the grip in the bottom-right corner to resize the plugin window; double-click it to
+return to 920x680. The size is remembered across runs and across files. Minimum is
+460x420, so the two panes stay usable.
+
 ## Excluding
 
 Two independent filters, both remembered per file between runs:
