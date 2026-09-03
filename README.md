@@ -4,8 +4,12 @@ Figma plugin. Finds every layer in the **whole document** bound to a chosen vari
 and shows where it lives: page, component set, variant, host instance, layer, and which
 property is bound.
 
-<img width="600" height="auto" alt="Screenshot 2026-09-03 at 08 50 19" src="https://github.com/user-attachments/assets/b851ae84-68a2-48f1-8942-d34bfff8a1db" />
-<img width="600" height="auto" alt="Screenshot 2026-09-03 at 08 53 33" src="https://github.com/user-attachments/assets/a8fa1f40-380e-4d67-81b2-a7d9dd8d1804" />
+<img width="600" height="auto" alt="Screenshot 2026-09-03 at 09 34 22" src="https://github.com/user-attachments/assets/7bfcf519-1242-42c7-9de9-4ddfb21d1eac" />
+<img width="600" height="auto" alt="Screenshot 2026-09-03 at 09 34 43" src="https://github.com/user-attachments/assets/0def2827-ed0e-452e-a188-4852a974f92a" />
+<img width="600" height="auto" alt="Screenshot 2026-09-03 at 09 35 24" src="https://github.com/user-attachments/assets/a106bd87-fafe-4987-81b9-6d9002c854e2" />
+
+
+
 
 
 ## Install
