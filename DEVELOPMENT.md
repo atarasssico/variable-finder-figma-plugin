@@ -45,6 +45,18 @@ it through a semantic variable.
 runs roughly 5s per 50k nodes and keeps the UI responsive, which is why the scan streams
 per-page results and can be stopped.
 
+Measured on a 178-page library, six pages / 52,848 layers, pages preloaded so the timing
+excludes page loading:
+
+| Variant | Time | Layers walked | Bindings found |
+|---|---|---|---|
+| Allocating `collectBindings`, flag off | 10.7s | 52,848 | 100 |
+| Null-returning `collectBindings`, flag off | 6.2s | 52,848 | 100 |
+| Both, `skipInvisibleInstanceChildren` on | 2.3s | 22,373 | 100 |
+
+42% from the allocation change, a further 63% from the flag, **79% overall**, with no
+change in results on that sample — the 30,475 skipped layers held no bindings.
+
 Four things keep a whole-document scan from feeling stuck:
 
 - `figma.skipInvisibleInstanceChildren` is set from the matching option (default on), so
@@ -68,7 +80,9 @@ execute times out until it clears.
 |---|---|
 | `collectBindings`, `describe`, variant strings, property paths, per-page totals | Verified against a 178-page, ~434k-node library. Component set, variant, host instance and field labels all resolve; per-page totals matched an independent scan. |
 | `code.js` and `ui.html` syntax | Verified with `node --check` (UI script extracted from the HTML). |
-| Exclusion pruning (page checklist + name patterns) | Not run live. Straightforward extension of the verified walker, but never executed. |
+| Name-pattern exclusion | Verified. Substring and glob forms prune identically (85 -> 66 hits, 4,144 subtrees pruned, 3.2s -> 1.9s on one page); a comma-separated pair pruned 8,039 subtrees on another; a non-matching pattern leaves results byte-identical to the baseline. |
+| `Skip inside instances` | Verified. 19,263 layers walked down to 901, 3.2s to 0.08s, hits 85 -> 65. |
+| Page exclusion checklist | Logic verified as a set filter over `figma.root.children`; the checklist UI itself is untested. |
 | Two-pane layout, page checklist rendering, `clientStorage` persistence, CSV copy, reveal-on-canvas | Not run live. A local dev plugin cannot be driven from an MCP bridge. |
 
 ## Not implemented
